@@ -39,9 +39,7 @@ main = do
       eval
       pull 0
     parse :: T.Text -> [Int]
-    parse =
-      fromMaybe [] . sequence
-      . map (readMaybe . T.unpack). T.split (== ',')
+    parse = fromMaybe [] . mapM (readMaybe . T.unpack). T.split (== ',')
 
 eval :: MonadComp m => m ()
 eval = do

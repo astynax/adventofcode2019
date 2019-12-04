@@ -1,3 +1,6 @@
+#!/usr/bin/env stack
+{- stack --resolver=lts-13.24 script -}
+
 main :: IO ()
 main = interact $ show . solve . parse . lines
 
