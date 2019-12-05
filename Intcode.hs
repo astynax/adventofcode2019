@@ -3,6 +3,9 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module Intcode
   ( Addr(..)
@@ -10,14 +13,20 @@ module Intcode
   , Op(..)
   , IntcodeState(..)
   , MonadIntcode
+  , MonadEnv(..)
+  , SimpleEnv()
+  , runSimpleEnv
   , readOp, load, push, jump
-  , run
+  , runIntcode
   ) where
 
+import Control.Applicative
 import Control.Monad.Except
+import Control.Monad.Reader
 import Control.Monad.State
 import Data.Char (digitToInt)
 import Data.Vector (Vector, (//), (!?))
+import qualified Data.Vector as V
 import Data.Void
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -55,7 +64,71 @@ data IntcodeState = IntcodeState
   }
   deriving Show
 
-type MonadIntcode m = (MonadState IntcodeState m, MonadError String m)
+type MonadIntcode m =
+  ( MonadState IntcodeState m
+  , MonadError String m
+  )
+
+class Monad m => MonadEnv m where
+  envInput  :: m Int
+  envOutput :: Int -> m ()
+  envTrace  :: IntcodeState -> Op -> m ()
+
+instance MonadEnv m => MonadEnv (StateT s m) where
+  envInput = lift envInput
+  envOutput = lift . envOutput
+  envTrace s o = lift $ envTrace s o
+
+instance MonadEnv m => MonadEnv (ExceptT e m) where
+  envInput = lift envInput
+  envOutput = lift . envOutput
+  envTrace s o = lift $ envTrace s o
+
+newtype SimpleEnv m a = SimpleEnv (ReaderT Int m a)
+  deriving (Functor, Applicative, Monad)
+
+instance MonadIO m => MonadEnv (SimpleEnv m) where
+  envInput = SimpleEnv ask
+  envOutput x = SimpleEnv (liftIO $ print x)
+  envTrace _ _ = SimpleEnv $ pure ()
+
+runSimpleEnv :: MonadIO m => SimpleEnv m a -> Int -> m a
+runSimpleEnv (SimpleEnv r) = runReaderT r
+
+runIntcode
+  :: MonadEnv m
+  => [Int]
+  -> m (Either String (), IntcodeState)
+runIntcode ops =
+  runExceptT eval `runStateT` IntcodeState 0 (V.fromList ops)
+
+eval :: (MonadEnv m, MonadIntcode m) => m ()
+eval = do
+  op <- readOp
+  get >>= flip envTrace op
+  unless (op == Stop) $ do
+    case op of
+      Stop        -> pure ()
+      Jnz p1 p2   -> jumpIf (/= 0) p1 p2
+      Jz  p1 p2   -> jumpIf (== 0) p1 p2
+      Add p1 p2 a -> binOp (+)     p1 p2 a id
+      Mul p1 p2 a -> binOp (*)     p1 p2 a id
+      Lt  p1 p2 a -> binOp (<)     p1 p2 a fromBool
+      Eq  p1 p2 a -> binOp (==)    p1 p2 a fromBool
+      In        a -> envInput >>= push a
+      Out p       -> getParam p >>= envOutput
+    eval
+  where
+    getParam (Position a)  = load a
+    getParam (Immediate x) = pure x
+    fromBool True = 1
+    fromBool _    = 0
+    binOp op p1 p2 a f =
+      liftA2 op (getParam p1) (getParam p2) >>= push a . f
+    jumpIf cond p1 p2 = do
+      v <- getParam p1
+      a <- getParam p2
+      when (cond v) $ jump $ Addr a
 
 readOp :: MonadIntcode m => m Op
 readOp = do
@@ -132,10 +205,3 @@ rawOpP = do
          '1' -> pure MImmediate
          _   -> fail "Bad mode!"
       ) <|> pure MPosition
-
-run
-  :: Monad m
-  => IntcodeState
-  -> ExceptT String (StateT IntcodeState m) ()
-  -> m (Either String (), IntcodeState)
-run s a = runStateT (runExceptT a) s
