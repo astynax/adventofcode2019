@@ -2,18 +2,29 @@
 {- stack --resolver=lts-13.24 script -}
 
 main :: IO ()
-main = interact $ show . solve . parse . lines
+main = interact $ solve . parse . lines
+  where
+    solve input = unlines
+      [ "Step 1"
+      , show $ solveWith toFuel1 input
+      , "Step 2"
+      , show $ solveWith toFuel2 input
+      ]
 
 parse :: [String] -> [Integer]
 parse = map read
 
-solve :: [Integer] -> Integer
-solve = sum . map toFuel
+solveWith :: (Integer -> Integer) -> [Integer] -> Integer
+solveWith = (sum .) . map
+
+toFuel1, toFuel2 :: Integer -> Integer
+
+toFuel1 = subtract 2 . (`div` 3)
+
+toFuel2 x = calc x - x
   where
-    -- toFuel = subtract 2 . (`div` 3)
-    toFuel x = calc x - x
-    calc x
-      | next < 0  = x
-      | otherwise = x + calc next
+    calc v
+      | next < 0  = v
+      | otherwise = v + calc next
       where
-        next = div x 3 - 2
+        next = div v 3 - 2
