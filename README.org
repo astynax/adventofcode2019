@@ -1,9 +1,7 @@
-#+TITLE: Advent of Code 2019
-
 * Advent of Code 2019
 ** About
  Here you can see my solutions for [[https://adventofcode.com/2019][AdventOfCode'19]] puzzles.
 ** Used tech
  Haskell + stack
-** Extra
+** Extra stuff
 [[file:Intcode.hs][Intcode.hs]] contains my implementation of Intcode Computer from 5th day puzzle. [[file:ICTrace.hs][ICTrace.hs]] implements simple tracing Intcode interpreter.
