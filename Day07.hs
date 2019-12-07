@@ -5,10 +5,12 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TupleSections #-}
 
 import Control.Exception
 import Control.Monad.State
 import Data.List (nub)
+import Data.Maybe (catMaybes)
 
 import qualified Input
 import Intcode
@@ -18,9 +20,9 @@ newtype EvalError = EvalError String deriving Show
 instance Exception EvalError
 
 data EnvState = EnvState
-  { esInput   :: [Int]
-  , esOutput  :: Maybe Int
-  , esHalted  :: Bool
+  { esInput  :: [Int]
+  , esOutput :: Maybe Int
+  , esHalted :: Bool
   }
 
 newtype Env a = Env (State EnvState a)
@@ -30,7 +32,7 @@ instance MonadEnv Env where
   envInput = Env $ gets esInput >>= \case
     (x:xs) -> x <$ modify (\es -> es { esInput = xs})
     _      -> error "Input underflow!"
-  envOutput v = Env $ modify $ \es -> es { esOutput = Just v }
+  envOutput v = Env . modify $ \es -> es { esOutput = Just v }
   envTrace _ _ = Env . \case
     Stp   -> StopAfter <$ modify (\es -> es { esHalted = True })
     Out _ -> pure StopAfter
@@ -38,9 +40,9 @@ instance MonadEnv Env where
 
 runEnv :: Env a -> Maybe Int -> Int -> (a, EnvState)
 runEnv (Env a) phase input = runState a EnvState
-  { esInput   = [x | Just x <- [phase, Just input]]
-  , esOutput  = Nothing
-  , esHalted  = False
+  { esInput  = catMaybes [phase, Just input]
+  , esOutput = Nothing
+  , esHalted = False
   }
 
 main :: IO ()
@@ -60,9 +62,8 @@ main = do
   print =<< maximum <$> mapM (run1 program) (phases 0)
   print =<< maximum <$> mapM (run2 program) (phases 5)
   where
-    initStates = replicate 5 . Intcode.initState
-    run i ss ps =
-      flip runStateT i $ sequence $ zipWith amp ss ps
+    initStates program = map $ (Intcode.initState program,) . Just
+    run i = flip runStateT i . mapM (uncurry amp)
       where
         amp s phase = do
           input <- get
@@ -76,13 +77,13 @@ main = do
               _                            ->
                 failWith "Halted before any output!"
         failWith = liftIO . throwIO . EvalError
-    run1 p = fmap snd . run 0 (initStates p) . map Just
-    run2 p = go 0 (initStates p) . map Just
+    run1 program ps = fmap snd . run 0 $ initStates program ps
+    run2 program ps = loop 0 $ initStates program ps
       where
-        go i ss ps = run i ss ps >>= \case
+        loop i ss = run i ss >>= \case
           (xs, v)
             | and fs      -> pure v
-            | not (or fs) -> go v (map snd xs) (replicate 5 Nothing)
+            | not (or fs) -> loop v $ map ((,Nothing) . snd) xs
             | otherwise   -> throwIO $ EvalError "Non-consistent amps!"
             where
               fs = map fst xs
