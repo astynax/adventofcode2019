@@ -150,36 +150,27 @@ eval = do
 
 readOp :: MonadIntcode m => m (Addr, Op)
 readOp = do
-  addr <- gets isPC
+  start <- gets isPC
   rawOpValue <- pull
   rawOp <- case parse rawOpP "" (reverse $ show rawOpValue) of
     Right x  -> pure x
     Left err -> throwError $ errorBundlePretty err
-  (addr,) <$> case rawOp of
-    RawOp a b MPosition 1  ->
-      Add <$> readParam a <*> readParam b <*> readAddr
-    RawOp a b MPosition 2  ->
-      Mul <$> readParam a <*> readParam b <*> readAddr
-    RawOp _ _ MPosition 3  ->
-      In  <$> readAddr
-    RawOp a _ _         4  ->
-      Out <$> readParam a
-    RawOp a b _         5  ->
-      Jnz <$> readParam a <*> readParam b
-    RawOp a b _         6  ->
-      Jz  <$> readParam a <*> readParam b
-    RawOp a b MPosition 7  ->
-      Lt  <$> readParam a <*> readParam b <*> readAddr
-    RawOp a b MPosition 8  ->
-      Eq  <$> readParam a <*> readParam b <*> readAddr
-    RawOp _ _ _         99 ->
-      pure Stp
+  (start,) <$> case rawOp of
+    RawOp a b MPosition 1  -> Add <$> p a <*> p b <*> addr
+    RawOp a b MPosition 2  -> Mul <$> p a <*> p b <*> addr
+    RawOp _ _ MPosition 3  -> In  <$>                 addr
+    RawOp a _ _         4  -> Out <$> p a
+    RawOp a b _         5  -> Jnz <$> p a <*> p b
+    RawOp a b _         6  -> Jz  <$> p a <*> p b
+    RawOp a b MPosition 7  -> Lt  <$> p a <*> p b <*> addr
+    RawOp a b MPosition 8  -> Eq  <$> p a <*> p b <*> addr
+    RawOp _ _ _         99 -> pure Stp
     _                      ->
       throwError $ "Bad op: " ++ show rawOpValue
   where
-    readParam MImmediate = Immediate <$> pull
-    readParam MPosition  = Position  <$> readAddr
-    readAddr = pull >>= \case
+    p MImmediate = Immediate <$> pull
+    p MPosition  = Position  <$> addr
+    addr = pull >>= \case
       x | x >= 0 -> pure $ Addr x
       x          -> throwError $ "Bad addr: " ++ show x
 
