@@ -1,6 +1,6 @@
 #!/usr/bin/env stack
 {- stack --resolver=lts-13.24 script
-  --package=vector,mtl,megaparsec,text,optparse-applicative
+  --package=vector,mtl,megaparsec,text
 -}
 
 {-# LANGUAGE FlexibleContexts #-}
@@ -8,22 +8,32 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
 
-import Control.Monad.Reader
+import Control.Monad.State
+import System.Environment (getArgs)
 
 import qualified Input
 import Intcode
 
+data InputStream
+  = Cons Int InputStream
+  | Forever Int
+
 newtype Env a =
-  Env (ReaderT Int IO a)
+  Env (StateT InputStream IO a)
   deriving (Functor, Applicative, Monad)
 
 instance MonadEnv Env where
   envInput = Env $ do
-    v <- ask
+    v <- get >>= \case
+      Cons x s  -> x <$ put s
+      Forever x -> pure x
     liftIO $ putStrLn $ "<<< " ++ show v
     pure v
-  envOutput  = Env . liftIO . putStrLn . (">>> " ++) . show
-  envTrace _ = Env . liftIO . putStrLn . ppOp
+  envOutput = Env . liftIO . putStrLn . (">>> " ++) . show
+  envTrace _ (Addr addr) op =
+    Env . (True <$) . liftIO $ do
+      putStr $ show addr ++ ":\t"
+      putStrLn $ ppOp op
     where
       ppOp = \case
         Stop        -> "STP"
@@ -39,13 +49,18 @@ instance MonadEnv Env where
       ppP (Immediate x) =       show x
       ppA (Addr x)      = '@' : show x
 
-runEnv :: Env a -> Int -> IO a
-runEnv (Env r) = runReaderT r
+runEnv :: Env a -> InputStream -> IO a
+runEnv (Env r) = evalStateT r
 
 main :: IO ()
-main = do
-  program <- Input.ints
-  run 1 program
+main = getArgs >>= \case
+  [] -> putStrLn "Usage: ictrace INT [INT...]"
+  xs -> do
+    let
+      intArgs = map read xs
+      stream  = foldr Cons (Forever $ last intArgs) (init intArgs)
+    program <- Input.ints
+    run stream program
   where
     run i p = Intcode.runIntcode p `runEnv` i >>= \case
       (Left err, st) -> putStrLn err >> print st

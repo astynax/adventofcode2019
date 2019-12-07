@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TupleSections #-}
 
 module Intcode
   ( Addr(..)
@@ -17,7 +18,7 @@ module Intcode
   , SimpleEnv()
   , runSimpleEnv
   , readOp, load, push, jump
-  , runIntcode
+  , initState, runIntcode, rerunIntcode
   ) where
 
 import Control.Applicative
@@ -59,7 +60,7 @@ data Op
   deriving (Show, Eq)
 
 data IntcodeState = IntcodeState
-  { isPC     :: Int
+  { isPC     :: Addr
   , isMemory :: Vector Int
   }
   deriving Show
@@ -72,17 +73,17 @@ type MonadIntcode m =
 class Monad m => MonadEnv m where
   envInput  :: m Int
   envOutput :: Int -> m ()
-  envTrace  :: IntcodeState -> Op -> m ()
+  envTrace  :: IntcodeState -> Addr -> Op -> m Bool
 
 instance MonadEnv m => MonadEnv (StateT s m) where
   envInput = lift envInput
   envOutput = lift . envOutput
-  envTrace s o = lift $ envTrace s o
+  envTrace s a o = lift $ envTrace s a o
 
 instance MonadEnv m => MonadEnv (ExceptT e m) where
   envInput = lift envInput
   envOutput = lift . envOutput
-  envTrace s o = lift $ envTrace s o
+  envTrace s a o = lift $ envTrace s a o
 
 newtype SimpleEnv m a = SimpleEnv (ReaderT Int m a)
   deriving (Functor, Applicative, Monad)
@@ -90,23 +91,31 @@ newtype SimpleEnv m a = SimpleEnv (ReaderT Int m a)
 instance MonadIO m => MonadEnv (SimpleEnv m) where
   envInput = SimpleEnv ask
   envOutput x = SimpleEnv (liftIO $ print x)
-  envTrace _ _ = SimpleEnv $ pure ()
+  envTrace _ _ _ = SimpleEnv $ pure True
 
 runSimpleEnv :: MonadIO m => SimpleEnv m a -> Int -> m a
 runSimpleEnv (SimpleEnv r) = runReaderT r
+
+initState :: [Int] -> IntcodeState
+initState = IntcodeState (Addr 0) . V.fromList
 
 runIntcode
   :: MonadEnv m
   => [Int]
   -> m (Either String (), IntcodeState)
-runIntcode ops =
-  runExceptT eval `runStateT` IntcodeState 0 (V.fromList ops)
+runIntcode = rerunIntcode . initState
+
+rerunIntcode
+  :: MonadEnv m
+  => IntcodeState
+  -> m (Either String (), IntcodeState)
+rerunIntcode = runStateT (runExceptT eval)
 
 eval :: (MonadEnv m, MonadIntcode m) => m ()
 eval = do
-  op <- readOp
-  get >>= flip envTrace op
-  unless (op == Stop) $ do
+  (addr, op) <- readOp
+  continue <- get >>= \s -> envTrace s addr op
+  unless (not continue || op == Stop) $ do
     case op of
       Stop        -> pure ()
       Jnz p1 p2   -> jumpIf (/= 0) p1 p2
@@ -130,13 +139,14 @@ eval = do
       a <- getParam p2
       when (cond v) $ jump $ Addr a
 
-readOp :: MonadIntcode m => m Op
+readOp :: MonadIntcode m => m (Addr, Op)
 readOp = do
+  addr <- gets isPC
   rawOpValue <- pull
   rawOp <- case parse rawOpP "" (reverse $ show rawOpValue) of
     Right x  -> pure x
     Left err -> throwError $ errorBundlePretty err
-  case rawOp of
+  (addr,) <$> case rawOp of
     RawOp a b MPosition 1  ->
       Add <$> readParam a <*> readParam b <*> readAddr
     RawOp a b MPosition 2  ->
@@ -166,11 +176,11 @@ readOp = do
 
 pull :: MonadIntcode m => m Int
 pull = do
-  IntcodeState pos mem <- get
+  IntcodeState (Addr pos) mem <- get
   cell <- case mem !? pos of
     Just x  -> pure x
     Nothing -> throwError "PC is out of bounds!"
-  put $ IntcodeState (pos + 1) mem
+  put $ IntcodeState (Addr $ pos + 1) mem
   pure cell
 
 load :: MonadIntcode m => Addr -> m Int
@@ -185,7 +195,7 @@ push (Addr a) v = modify $ \c -> c
   }
 
 jump :: MonadIntcode m => Addr -> m ()
-jump (Addr a) = modify $ \c -> c { isPC = a }
+jump a = modify $ \c -> c { isPC = a }
 
 rawOpP :: Parsec Void String RawOp
 rawOpP = do
