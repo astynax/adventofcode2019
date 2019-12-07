@@ -21,7 +21,6 @@ data EnvState = EnvState
   { esInput   :: [Int]
   , esOutput  :: Maybe Int
   , esHalted  :: Bool
-  , esLastPos :: Addr
   }
 
 newtype Env a = Env (State EnvState a)
@@ -32,20 +31,16 @@ instance MonadEnv Env where
     (x:xs) -> x <$ modify (\es -> es { esInput = xs})
     _      -> error "Input underflow!"
   envOutput v = Env $ modify $ \es -> es { esOutput = Just v }
-  envTrace _ a op = Env $ do
-    modify $ \es -> es { esLastPos = a }
-    gets esOutput >>= \case
-      Nothing ->
-        True <$ modify (\es -> es { esHalted = esHalted es || op == Stop })
-      Just _  ->
-        pure False
+  envTrace _ _ = Env . \case
+    Stp   -> StopAfter <$ modify (\es -> es { esHalted = True })
+    Out _ -> pure StopAfter
+    _     -> pure Continue
 
 runEnv :: Env a -> Maybe Int -> Int -> (a, EnvState)
 runEnv (Env a) phase input = runState a EnvState
   { esInput   = [x | Just x <- [phase, Just input]]
   , esOutput  = Nothing
   , esHalted  = False
-  , esLastPos = Addr 0
   }
 
 main :: IO ()
@@ -74,12 +69,12 @@ main = do
           case runEnv (Intcode.rerunIntcode s) phase input of
             ((Left err, _), _) -> failWith $ show err
             ((_, x),       es) -> case es of
-              EnvState _ (Just o) _ p   ->
-                (False, x { isPC = p }) <$ put o
-              EnvState _ Nothing True _ ->
+              EnvState _ (Just o) _   ->
+                (False, x) <$ put o
+              EnvState _ Nothing True ->
                 pure (True, x)
               _                            ->
-                failWith "No output and halt!"
+                failWith "Halted before any output!"
         failWith = liftIO . throwIO . EvalError
     run1 p = fmap snd . run 0 (initStates p) . map Just
     run2 p = go 0 (initStates p) . map Just

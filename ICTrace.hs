@@ -31,12 +31,12 @@ instance MonadEnv Env where
     pure v
   envOutput = Env . liftIO . putStrLn . (">>> " ++) . show
   envTrace _ (Addr addr) op =
-    Env . (True <$) . liftIO $ do
+    Env . (Continue <$) . liftIO $ do
       putStr $ show addr ++ ":\t"
       putStrLn $ ppOp op
     where
       ppOp = \case
-        Stop        -> "STP"
+        Stp         -> "STP"
         Jnz p1 p2   -> "JNZ\t" ++ ppP p1 ++ "\t" ++ ppP p2
         Jz  p1 p2   -> "JZE\t" ++ ppP p1 ++ "\t" ++ ppP p2
         Add p1 p2 a -> "ADD\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppA a

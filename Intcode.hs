@@ -16,6 +16,7 @@ module Intcode
   , MonadIntcode
   , MonadEnv(..)
   , SimpleEnv()
+  , Control(..)
   , runSimpleEnv
   , readOp, load, push, jump
   , initState, runIntcode, rerunIntcode
@@ -56,7 +57,7 @@ data Op
   | Jz  Param Param
   | Lt  Param Param Addr
   | Eq  Param Param Addr
-  | Stop
+  | Stp
   deriving (Show, Eq)
 
 data IntcodeState = IntcodeState
@@ -70,10 +71,16 @@ type MonadIntcode m =
   , MonadError String m
   )
 
+data Control
+  = Continue
+  | StopBefore
+  | StopAfter
+  deriving (Show, Eq)
+
 class Monad m => MonadEnv m where
   envInput  :: m Int
   envOutput :: Int -> m ()
-  envTrace  :: IntcodeState -> Addr -> Op -> m Bool
+  envTrace  :: IntcodeState -> Addr -> Op -> m Control
 
 instance MonadEnv m => MonadEnv (StateT s m) where
   envInput = lift envInput
@@ -91,7 +98,7 @@ newtype SimpleEnv m a = SimpleEnv (ReaderT Int m a)
 instance MonadIO m => MonadEnv (SimpleEnv m) where
   envInput = SimpleEnv ask
   envOutput x = SimpleEnv (liftIO $ print x)
-  envTrace _ _ _ = SimpleEnv $ pure True
+  envTrace _ _ _ = SimpleEnv $ pure Continue
 
 runSimpleEnv :: MonadIO m => SimpleEnv m a -> Int -> m a
 runSimpleEnv (SimpleEnv r) = runReaderT r
@@ -114,10 +121,12 @@ rerunIntcode = runStateT (runExceptT eval)
 eval :: (MonadEnv m, MonadIntcode m) => m ()
 eval = do
   (addr, op) <- readOp
-  continue <- get >>= \s -> envTrace s addr op
-  unless (not continue || op == Stop) $ do
+  control <- get >>= \s -> envTrace s addr op
+  if control == StopBefore
+  then modify (\s -> s { isPC = addr})  -- restore PC
+  else unless (op == Stp) $ do
     case op of
-      Stop        -> pure ()
+      Stp         -> pure ()
       Jnz p1 p2   -> jumpIf (/= 0) p1 p2
       Jz  p1 p2   -> jumpIf (== 0) p1 p2
       Add p1 p2 a -> binOp (+)     p1 p2 a id
@@ -126,7 +135,7 @@ eval = do
       Eq  p1 p2 a -> binOp (==)    p1 p2 a fromBool
       In        a -> envInput >>= push a
       Out p       -> getParam p >>= envOutput
-    eval
+    when (control == Continue) eval
   where
     getParam (Position a)  = load a
     getParam (Immediate x) = pure x
@@ -164,7 +173,7 @@ readOp = do
     RawOp a b MPosition 8  ->
       Eq  <$> readParam a <*> readParam b <*> readAddr
     RawOp _ _ _         99 ->
-      pure Stop
+      pure Stp
     _                      ->
       throwError $ "Bad op: " ++ show rawOpValue
   where
