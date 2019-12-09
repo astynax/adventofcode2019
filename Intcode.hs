@@ -10,6 +10,8 @@
 
 module Intcode
   ( Addr(..)
+  , RAddr(..)
+  , Pointer(..)
   , Param(..)
   , Op(..)
   , IntcodeState(..)
@@ -27,42 +29,54 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Char (digitToInt)
-import Data.Vector (Vector, (//), (!?))
-import qualified Data.Vector as V
+import Data.IntMap.Strict (IntMap, (!?))
+import qualified Data.IntMap.Strict as IntMap
 import Data.Void
 import Text.Megaparsec
 import Text.Megaparsec.Char
 
 data ParamMode
-  = MPosition
+  = MPointer PointerMode
   | MImmediate
-  deriving Show
+  deriving (Show)
+
+data PointerMode
+  = MAbsolute
+  | MRelative
+  deriving (Show)
 
 data RawOp = RawOp ParamMode ParamMode ParamMode Int
   deriving Show
 
 newtype Addr = Addr Int deriving (Show, Eq)
+newtype RAddr = RAddr Int deriving (Show, Eq)
+
+data Pointer
+  = APtr Addr
+  | RPtr RAddr
+  deriving (Show, Eq)
 
 data Param
-  = Position Addr
+  = Pointer Pointer
   | Immediate Int
   deriving (Show, Eq)
 
 data Op
-  = Add Param Param Addr
-  | Mul Param Param Addr
-  | In              Addr
+  = Add Param Param Pointer
+  | Mul Param Param Pointer
+  | In              Pointer
   | Out Param
   | Jnz Param Param
   | Jz  Param Param
-  | Lt  Param Param Addr
-  | Eq  Param Param Addr
+  | Lt  Param Param Pointer
+  | Eq  Param Param Pointer
   | Stp
   deriving (Show, Eq)
 
 data IntcodeState = IntcodeState
-  { isPC     :: Addr
-  , isMemory :: Vector Int
+  { isPC      :: Addr
+  , isRelBase :: Int
+  , isMemory  :: IntMap Int
   }
   deriving Show
 
@@ -104,7 +118,7 @@ runSimpleEnv :: MonadIO m => SimpleEnv m a -> Int -> m a
 runSimpleEnv (SimpleEnv r) = runReaderT r
 
 initState :: [Int] -> IntcodeState
-initState = IntcodeState (Addr 0) . V.fromList
+initState = IntcodeState (Addr 0) 0 . IntMap.fromList . zip [0..]
 
 runIntcode
   :: MonadEnv m
@@ -137,7 +151,7 @@ eval = do
       Out p       -> getParam p >>= envOutput
     when (control == Continue) eval
   where
-    getParam (Position a)  = load a
+    getParam (Pointer p)   = load p
     getParam (Immediate x) = pure x
     fromBool True = 1
     fromBool _    = 0
@@ -156,42 +170,50 @@ readOp = do
     Right x  -> pure x
     Left err -> throwError $ errorBundlePretty err
   (start,) <$> case rawOp of
-    RawOp a b MPosition 1  -> Add <$> p a <*> p b <*> addr
-    RawOp a b MPosition 2  -> Mul <$> p a <*> p b <*> addr
-    RawOp _ _ MPosition 3  -> In  <$>                 addr
-    RawOp a _ _         4  -> Out <$> p a
-    RawOp a b _         5  -> Jnz <$> p a <*> p b
-    RawOp a b _         6  -> Jz  <$> p a <*> p b
-    RawOp a b MPosition 7  -> Lt  <$> p a <*> p b <*> addr
-    RawOp a b MPosition 8  -> Eq  <$> p a <*> p b <*> addr
-    RawOp _ _ _         99 -> pure Stp
-    _                      ->
+    RawOp a b (MPointer c) 1  -> Add <$> p a <*> p b <*> ptr c
+    RawOp a b (MPointer c) 2  -> Mul <$> p a <*> p b <*> ptr c
+    RawOp _ _ (MPointer c) 3  -> In  <$>                 ptr c
+    RawOp a _ _            4  -> Out <$> p a
+    RawOp a b _            5  -> Jnz <$> p a <*> p b
+    RawOp a b _            6  -> Jz  <$> p a <*> p b
+    RawOp a b (MPointer c) 7  -> Lt  <$> p a <*> p b <*> ptr c
+    RawOp a b (MPointer c) 8  -> Eq  <$> p a <*> p b <*> ptr c
+    RawOp _ _ _            99 -> pure Stp
+    _                         ->
       throwError $ "Bad op: " ++ show rawOpValue
   where
-    p MImmediate = Immediate <$> pull
-    p MPosition  = Position  <$> addr
-    addr = pull >>= \case
-      x | x >= 0 -> pure $ Addr x
+    p MImmediate   = Immediate <$> pull
+    p (MPointer x) = Pointer   <$> ptr x
+    ptr MAbsolute = APtr . Addr  <$> rawAddr
+    ptr MRelative = RPtr . RAddr <$> rawAddr
+    rawAddr = pull >>= \case
+      x | x >= 0 -> pure x
       x          -> throwError $ "Bad addr: " ++ show x
 
 pull :: MonadIntcode m => m Int
 pull = do
-  IntcodeState (Addr pos) mem <- get
+  IntcodeState (Addr pos) r mem <- get
   cell <- case mem !? pos of
     Just x  -> pure x
     Nothing -> throwError "PC is out of bounds!"
-  put $ IntcodeState (Addr $ pos + 1) mem
+  put $ IntcodeState (Addr $ pos + 1) r mem
   pure cell
 
-load :: MonadIntcode m => Addr -> m Int
-load (Addr a) =
-  gets isMemory >>= \mem -> case mem !? a of
-    Just x  -> pure x
-    Nothing -> throwError "Addr is out of bounds!"
+ptr2addr :: MonadIntcode m => Pointer -> m Addr
+ptr2addr (APtr a)         = pure a
+ptr2addr (RPtr (RAddr x)) = Addr . (+ x) <$> gets isRelBase
 
-push :: MonadIntcode m => Addr -> Int -> m ()
-push (Addr a) v = modify $ \c -> c
-  { isMemory = isMemory c // [(a, v)]
+load :: MonadIntcode m => Pointer -> m Int
+load p = do
+  Addr a <- ptr2addr p
+  mem <- gets isMemory
+  case mem !? a of
+    Just x  -> pure x
+    Nothing -> throwError $ "Pointer refers an empty cell: " ++ show p
+
+push :: MonadIntcode m => Pointer -> Int -> m ()
+push p v = ptr2addr p >>= \(Addr a) -> modify $ \c -> c
+  { isMemory = IntMap.insert a v $ isMemory c
   }
 
 jump :: MonadIntcode m => Addr -> m ()
@@ -204,14 +226,16 @@ rawOpP = do
     Just d ->
       RawOp <$> modeP <*> modeP <*> modeP <*> pure (d * 10 + e)
     Nothing ->
-      pure $ RawOp MPosition MPosition MPosition e
+      pure $ RawOp defMode defMode defMode e
   eof
   pure op
   where
+    defMode = MPointer MAbsolute
     digitP = digitToInt <$> digitChar
-    modeP = try (
-      digitChar >>= \case
-         '0' -> pure MPosition
-         '1' -> pure MImmediate
-         _   -> fail "Bad mode!"
-      ) <|> pure MPosition
+    modeP = try
+      (digitChar >>= \case
+        '0' -> pure $ MPointer MAbsolute
+        '1' -> pure MImmediate
+        '2' -> pure $ MPointer MRelative
+        _   -> fail "Bad mode!"
+      ) <|> pure defMode

@@ -1,6 +1,6 @@
 #!/usr/bin/env stack
 {- stack --resolver=lts-13.24 script
-  --package=vector,mtl,megaparsec,text
+  --package=containers,mtl,megaparsec,text
 -}
 
 {-# LANGUAGE FlexibleContexts #-}
@@ -39,15 +39,16 @@ instance MonadEnv Env where
         Stp         -> "STP"
         Jnz p1 p2   -> "JNZ\t" ++ ppP p1 ++ "\t" ++ ppP p2
         Jz  p1 p2   -> "JZE\t" ++ ppP p1 ++ "\t" ++ ppP p2
-        Add p1 p2 a -> "ADD\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppA a
-        Mul p1 p2 a -> "MUL\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppA a
-        Lt  p1 p2 a -> "LTN\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppA a
-        Eq  p1 p2 a -> "EQL\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppA a
-        In        a -> "INP\t" ++ ppA a
+        Add p1 p2 a -> "ADD\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppPtr a
+        Mul p1 p2 a -> "MUL\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppPtr a
+        Lt  p1 p2 a -> "LTN\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppPtr a
+        Eq  p1 p2 a -> "EQL\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppPtr a
+        In        a -> "INP\t" ++ ppPtr a
         Out p       -> "OUT\t" ++ ppP p
-      ppP (Position a)  = ppA a
+      ppP (Pointer p)   = ppPtr p
       ppP (Immediate x) =       show x
-      ppA (Addr x)      = '@' : show x
+      ppPtr (APtr (Addr x))  = '@'  : show x
+      ppPtr (RPtr (RAddr x)) = "@@" ++ show x
 
 runEnv :: Env a -> InputStream -> IO a
 runEnv (Env r) = evalStateT r

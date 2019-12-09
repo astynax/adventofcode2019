@@ -1,5 +1,5 @@
 #!/usr/bin/env stack
-{- stack --resolver=lts-13.24 script --package=vector,mtl,megaparsec,text -}
+{- stack --resolver=lts-13.24 script --package=containers,mtl,megaparsec,text -}
 
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
