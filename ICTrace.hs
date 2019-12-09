@@ -9,6 +9,9 @@
 {-# LANGUAGE DeriveFunctor #-}
 
 import Control.Monad.State
+import Data.IntMap ((!?))
+import qualified Data.IntMap as IntMap
+import Data.Maybe (fromMaybe)
 import System.Environment (getArgs)
 
 import qualified Input
@@ -30,9 +33,9 @@ instance MonadEnv Env where
     liftIO $ putStrLn $ "<<< " ++ show v
     pure v
   envOutput = Env . liftIO . putStrLn . (">>> " ++) . show
-  envTrace _ (Addr addr) op =
+  envTrace s (Addr addr) op =
     Env . (Continue <$) . liftIO $ do
-      putStr $ show addr ++ ":\t"
+      putStr $ show (isRelBase s) ++ "\t/" ++ show addr ++ ":\t"
       putStrLn $ ppOp op
     where
       ppOp = \case
@@ -44,11 +47,15 @@ instance MonadEnv Env where
         Lt  p1 p2 a -> "LTN\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppPtr a
         Eq  p1 p2 a -> "EQL\t" ++ ppP p1 ++ "\t" ++ ppP p2 ++ "\t" ++ ppPtr a
         In        a -> "INP\t" ++ ppPtr a
-        Out p       -> "OUT\t" ++ ppP p
+        Out p1      -> "OUT\t" ++ ppP p1
+        Rbs p1      -> "RBS\t" ++ ppP p1
       ppP (Pointer p)   = ppPtr p
-      ppP (Immediate x) =       show x
-      ppPtr (APtr (Addr x))  = '@'  : show x
-      ppPtr (RPtr (RAddr x)) = "@@" ++ show x
+      ppP (Immediate x) = show x
+      ppPtr a@(APtr (Addr x))  = "@"  ++ show x ++ "(" ++ show (valAt a) ++ ")"
+      ppPtr a@(RPtr (RAddr x)) = "@@" ++ show x ++ "(" ++ show (valAt a) ++ ")"
+      valAt = fromMaybe 0 . (isMemory s !?) . \case
+        APtr (Addr x)  -> x
+        RPtr (RAddr x) -> isRelBase s + x
 
 runEnv :: Env a -> InputStream -> IO a
 runEnv (Env r) = evalStateT r

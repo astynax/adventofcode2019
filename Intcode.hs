@@ -31,6 +31,7 @@ import Control.Monad.State
 import Data.Char (digitToInt)
 import Data.IntMap.Strict (IntMap, (!?))
 import qualified Data.IntMap.Strict as IntMap
+import Data.Maybe (fromMaybe)
 import Data.Void
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -70,6 +71,7 @@ data Op
   | Jz  Param Param
   | Lt  Param Param Pointer
   | Eq  Param Param Pointer
+  | Rbs Param
   | Stp
   deriving (Show, Eq)
 
@@ -148,7 +150,9 @@ eval = do
       Lt  p1 p2 a -> binOp (<)     p1 p2 a fromBool
       Eq  p1 p2 a -> binOp (==)    p1 p2 a fromBool
       In        a -> envInput >>= push a
-      Out p       -> getParam p >>= envOutput
+      Out p1      -> getParam p1 >>= envOutput
+      Rbs p1      -> getParam p1 >>= \x -> modify $ \is ->
+        is { isRelBase = isRelBase is + x }
     when (control == Continue) eval
   where
     getParam (Pointer p)   = load p
@@ -172,22 +176,23 @@ readOp = do
   (start,) <$> case rawOp of
     RawOp a b (MPointer c) 1  -> Add <$> p a <*> p b <*> ptr c
     RawOp a b (MPointer c) 2  -> Mul <$> p a <*> p b <*> ptr c
-    RawOp _ _ (MPointer c) 3  -> In  <$>                 ptr c
+    RawOp (MPointer a) _ _ 3  -> In  <$>                 ptr a
     RawOp a _ _            4  -> Out <$> p a
     RawOp a b _            5  -> Jnz <$> p a <*> p b
     RawOp a b _            6  -> Jz  <$> p a <*> p b
     RawOp a b (MPointer c) 7  -> Lt  <$> p a <*> p b <*> ptr c
     RawOp a b (MPointer c) 8  -> Eq  <$> p a <*> p b <*> ptr c
+    RawOp a _ _            9  -> Rbs <$> p a
     RawOp _ _ _            99 -> pure Stp
     _                         ->
       throwError $ "Bad op: " ++ show rawOpValue
   where
     p MImmediate   = Immediate <$> pull
     p (MPointer x) = Pointer   <$> ptr x
-    ptr MAbsolute = APtr . Addr  <$> rawAddr
-    ptr MRelative = RPtr . RAddr <$> rawAddr
-    rawAddr = pull >>= \case
-      x | x >= 0 -> pure x
+    ptr MAbsolute = APtr . Addr  <$> rawAddr (>= 0)
+    ptr MRelative = RPtr . RAddr <$> rawAddr (const True)
+    rawAddr cond = pull >>= \case
+      x | cond x -> pure x
       x          -> throwError $ "Bad addr: " ++ show x
 
 pull :: MonadIntcode m => m Int
@@ -206,10 +211,7 @@ ptr2addr (RPtr (RAddr x)) = Addr . (+ x) <$> gets isRelBase
 load :: MonadIntcode m => Pointer -> m Int
 load p = do
   Addr a <- ptr2addr p
-  mem <- gets isMemory
-  case mem !? a of
-    Just x  -> pure x
-    Nothing -> throwError $ "Pointer refers an empty cell: " ++ show p
+  fromMaybe 0 . (!? a) <$> gets isMemory
 
 push :: MonadIntcode m => Pointer -> Int -> m ()
 push p v = ptr2addr p >>= \(Addr a) -> modify $ \c -> c
