@@ -1,5 +1,6 @@
 module Input
   ( ints
+  , intsFile
   ) where
 
 import Data.Maybe (fromMaybe)
@@ -9,6 +10,9 @@ import Text.Read (readMaybe)
 
 ints :: IO [Int]
 ints = parse <$> TIO.getLine
-  where
-    parse :: T.Text -> [Int]
-    parse = fromMaybe [] . mapM (readMaybe . T.unpack). T.split (== ',')
+
+intsFile :: FilePath -> IO [Int]
+intsFile = fmap parse . TIO.readFile
+
+parse :: T.Text -> [Int]
+parse = fromMaybe [] . mapM (readMaybe . T.unpack). T.split (== ',')
