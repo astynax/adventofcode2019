@@ -44,16 +44,27 @@ main = do
   checkExample exampleCB2 13312
   interact $ \s ->
     let
-      Right rs = parseLines reactionP s
-      cb       = buildCookBook rs
+      Right rs      = parseLines reactionP s
+      cb            = buildCookBook rs
+      corePer1Fuel  = oreForFuel cb 1
+      minFuelFrom1T = oneT `div` corePer1Fuel
+      fuelFrom1T    = binSearch cb minFuelFrom1T (2 * minFuelFrom1T)
     in unlines
        [ "Step 1"
-       , show $ count labSource "ORE" $ produce (1 :* "FUEL") cb cleanLab
+       , show corePer1Fuel
        , "Step 2"
-       , show $ count labSource "ORE" $ produce (3412429 :* "FUEL") cb cleanLab
-       , show $ count labSource "ORE" $ produce (3412430 :* "FUEL") cb cleanLab
-       -- just good old manual binary search -----^ :)
+       , show fuelFrom1T
        ]
+  where
+    oneT = 1000000000000
+    oreForFuel cb n = count labSource "ORE" $ produce (n :* "FUEL") cb cleanLab
+    binSearch cb l h
+      | l == m    = l
+      | x > oneT  = binSearch cb l m
+      | otherwise = binSearch cb m h
+      where
+        m = l + (h - l) `div` 2
+        x = oreForFuel cb m
 
 -- parsing
 
