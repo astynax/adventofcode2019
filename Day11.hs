@@ -12,6 +12,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 
+import Area
 import qualified Input
 import Intcode
 
@@ -43,11 +44,10 @@ instance MonadEnv Env where
 
 data Color = Black | White deriving (Show, Eq, Enum)
 data Turn = TurnLeft | TurnRight deriving (Show, Eq, Enum)
-data Dir = U | D | L | R
 
 data PaintBotState = PaintBotState
   { pbsIntcodeState :: IntcodeState
-  , pbsField        :: Map (Int, Int) Color
+  , pbsField        :: AreaMap Color
   , pbsPosition     :: (Int, Int)
   , pbsDirection    :: Dir
   }
@@ -58,7 +58,11 @@ main = do
   putStrLn "Step 1"
   paint Black program >>= print . length
   putStrLn "Step 2"
-  paint White program >>= visualize
+  paint White program >>= Area.visualize toChar
+  where
+    toChar Nothing      = ' '
+    toChar (Just Black) = '.'
+    toChar (Just White) = '#'
 
 paint :: Color -> [Int] -> IO (Map (Int, Int) Color)
 paint sc = evalStateT loop . initPaintBot sc
@@ -87,23 +91,6 @@ paint sc = evalStateT loop . initPaintBot sc
     rotate TurnRight L = U
     rotate TurnRight D = L
     rotate TurnRight R = D
-    move U (x, y) = (x, y - 1)
-    move D (x, y) = (x, y + 1)
-    move L (x, y) = (x - 1, y)
-    move R (x, y) = (x + 1, y)
-
-visualize :: Map (Int, Int) Color -> IO ()
-visualize m = mapM_ putStrLn rows
-  where
-    (xs, ys) = unzip . map fst $ Map.toList m
-    rows =
-      [ [ case fromMaybe Black (Map.lookup (x, y) m) of
-            Black -> '.'
-            White -> '#'
-        | x <- [minimum xs .. maximum xs]
-        ]
-      | y <- [minimum ys .. maximum ys]
-      ]
 
 initPaintBot :: Color -> [Int] -> PaintBotState
 initPaintBot c program = PaintBotState

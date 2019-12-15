@@ -11,11 +11,11 @@ import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.IORef
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import System.IO (stdin, hSetBuffering, BufferMode(..))
 
+import Area
 import qualified Input
 import Intcode
 
@@ -23,7 +23,7 @@ newtype EvalError = EvalError String deriving Show
 
 instance Exception EvalError
 
-type GameMap = Map (Int, Int) Int
+type GameMap = AreaMap Int
 
 data GameState = GameState
   { gsIntcodeState :: IntcodeState
@@ -66,13 +66,20 @@ instance MonadEnv LiveEnv where
       cells = Map.toList field
       (((px, _), _):_) = filter ((== 3) . snd) cells
       (((bx, _), _):_) = filter ((== 4) . snd) cells
-    visualize field
+    display field
     threadDelay 50000
     pure $ if px < bx then 1 else if px > bx then -1 else 0  -- AI! :)
   --   getChar >>= \case
   --       'j' -> pure (-1)
   --       'l' -> pure 1
   --       _   -> pure 0
+    where
+      display = visualize $ \case
+        Just 1 -> '#'
+        Just 2 -> '$'
+        Just 3 -> '~'
+        Just 4 -> '.'
+        _      -> ' '
   envOutput  v = LiveEnv $ ask >>= \ref -> liftIO $ do
     s <- readIORef ref
     writeIORef ref $ case lesOutput s of
@@ -118,24 +125,6 @@ play2 program = do
     _             -> do
       s <- readIORef ref
       pure $ fromMaybe 0 $ Map.lookup (-1, 0) $ lesField s
-
-visualize :: Map (Int, Int) Int -> IO ()
-visualize m
-  | length m == 0 = pure ()
-  | otherwise     = mapM_ putStrLn rows
-  where
-    (xs, ys) = unzip . map fst $ Map.toList m
-    rows =
-      [ [ case fromMaybe 0 (Map.lookup (x, y) m) of
-            1 -> '#'
-            2 -> '$'
-            3 -> '~'
-            4 -> '.'
-            _ -> ' '
-        | x <- [minimum xs .. maximum xs]
-        ]
-      | y <- [minimum ys .. maximum ys]
-      ]
 
 initGame :: [Int] -> GameState
 initGame program = GameState
