@@ -9,7 +9,8 @@
 {-# LANGUAGE TupleSections #-}
 
 module Intcode
-  ( Addr(..)
+  ( Intcode
+  , Addr(..)
   , RAddr(..)
   , Pointer(..)
   , Param(..)
@@ -35,6 +36,8 @@ import Data.Maybe (fromMaybe)
 import Data.Void
 import Text.Megaparsec
 import Text.Megaparsec.Char
+
+type Intcode = [Int]
 
 data ParamMode
   = MPointer PointerMode
