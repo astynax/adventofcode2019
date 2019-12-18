@@ -9,21 +9,18 @@
 {-# LANGUAGE ConstraintKinds #-}
 
 import Control.Applicative
-import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Char (chr, ord)
-import Data.List (intercalate)
+import Data.List
+import Data.Maybe
 import qualified Data.Map.Strict as Map
 
 import Area
 import qualified Input
+import Errors
 import Intcode
-
-newtype EvalError = EvalError String deriving Show
-
-instance Exception EvalError
 
 newtype Env a = Env { runEnv :: Writer String a }
   deriving (Functor, Applicative, Monad)
@@ -33,7 +30,7 @@ instance MonadEnv Env where
   envOutput v    = Env $ tell [chr v]
   envTrace _ _ _ = Env $ pure Continue
 
-data RobotCmd = RR | RL | RF Int deriving (Show)
+data RobotCmd = RR | RL | RF Int deriving (Show, Eq)
 
 data Walker = Walker
   { wPath :: ![RobotCmd]
@@ -79,24 +76,14 @@ main = do
   print $ sum $ map (uncurry (*)) $ crosses area
   putStrLn "Step 2"
   let way = findWay area
-  putStrLn $ intercalate "," $ map displayRC way
+  putStrLn $ showWay way
   let
-    input =
-      map ord $ unlines
-        ["A,B,A,C,A,B,C,B,C,B"
-        ,"L,10,R,8,L,6,R,6"
-        ,"L,8,L,8,R,8"
-        ,"R,8,L,6,L,10,L,10"
-        ,"n"
-        ] -- TODO: remove hardcode
+    split = head $ goodWaySplits way
+    input = map ord $ unlines $ split ++ ["n"]
   vs <- runRobot program input
   putStrLn $ map chr vs
   print $ last vs
   where
-    displayRC = \case
-      RF x -> show x
-      RL   -> "L"
-      RR   -> "R"
     fromChar = \case
       '.' -> Nothing
       x   -> Just x
@@ -173,7 +160,55 @@ runRobot program input =
     ((Left err, _), _) -> failWith $ show err
     (_,             y) -> pure $ rsOutput y
   where
-    p = 2 : tail program
+    p = 2 : tail program  -- change program mode
 
-failWith :: MonadIO m => String -> m a
-failWith = liftIO . throwIO . EvalError
+goodWaySplits :: [RobotCmd] -> [[String]]
+goodWaySplits way =
+  [ [sp, sa, sb, sc]
+  | ((a, b, c), p) <- decompose ((<= 20) . length . showWay) way
+  , let sa = showWay a
+  , let sb = showWay b
+  , let sc = showWay c
+  , let sp = intersperse ',' p
+  , length sp <= 20
+  ]
+
+showWay :: [RobotCmd] -> String
+showWay = (intercalate "," .) . map $ \case
+  RF x -> show x
+  RL   -> "L"
+  RR   -> "R"
+
+decompose :: Eq a => ([a] -> Bool) -> [a] -> [(([a], [a], [a]), String)]
+decompose cond xs =
+  [ (trio, s)
+  | (trio, Just s) <- map ((,) <$> id <*> (`trySplitTo` xs)) trios
+  ]
+  where
+    trios =
+      [ (a, b, c)
+      | let ss = filter cond $ subseqs xs
+      , a <- ss
+      , b <- ss
+      , c <- ss
+      , a /= b && b /= c
+      ]
+    subseqs = filter (not . null) . concatMap tails . inits
+
+trySplitTo :: Eq a => ([a], [a], [a]) -> [a] -> Maybe String
+trySplitTo (a, b, c) = go []
+  where
+    go acc [] = Just $ reverse acc
+    go acc s
+      | let (f, s') = dropStart la a
+      , f         = go ('A':acc) s'
+      | let (f, s') = dropStart lb b
+      , f         = go ('B':acc) s'
+      | let (f, s') = dropStart lc c
+      , f         = go ('C':acc) s'
+      | otherwise = Nothing
+      where
+        dropStart l x = (take l s == x, drop l s)
+    la = length a
+    lb = length b
+    lc = length c
