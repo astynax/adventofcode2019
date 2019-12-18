@@ -6,19 +6,15 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
 
-import Control.Exception
 import Control.Monad.State
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 
 import Area
+import Errors
 import qualified Input
 import Intcode
-
-newtype EvalError = EvalError String deriving Show
-
-instance Exception EvalError
 
 data EnvState = EnvState
   { esInput  :: Int
@@ -120,5 +116,3 @@ step c = do
   case runEnv (Intcode.rerunIntcode s) (fromEnum c) of
     ((Left err, _), _) -> failWith $ show err
     ((_, x),        y) -> y <$ modify (\pbs -> pbs { pbsIntcodeState = x })
-  where
-    failWith = liftIO . throwIO . EvalError

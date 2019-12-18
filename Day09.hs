@@ -5,18 +5,12 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE TupleSections #-}
 
-import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.Writer
 
 import qualified Input
 import Intcode
-
-newtype EvalError = EvalError String deriving Show
-
-instance Exception EvalError
 
 newtype Env a = Env (ReaderT Int (Writer [Int]) a)
   deriving (Functor, Applicative, Monad)

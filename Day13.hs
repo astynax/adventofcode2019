@@ -7,7 +7,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 
 import Control.Concurrent (threadDelay)
-import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.IORef
@@ -16,12 +15,9 @@ import Data.Maybe (fromMaybe)
 import System.IO (stdin, hSetBuffering, BufferMode(..))
 
 import Area
+import Errors
 import qualified Input
 import Intcode
-
-newtype EvalError = EvalError String deriving Show
-
-instance Exception EvalError
 
 type GameMap = AreaMap Int
 
@@ -151,6 +147,3 @@ step i = do
   case runEnv (Intcode.rerunIntcode s) i of
     ((Left err, _), _) -> failWith $ show err
     ((_, x),        y) -> y <$ modify (\gs -> gs { gsIntcodeState = x })
-
-failWith :: MonadIO m => String -> m a
-failWith = liftIO . throwIO . EvalError

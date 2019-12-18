@@ -7,18 +7,14 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ConstraintKinds #-}
 
-import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import qualified Data.Map.Strict as Map
 
 import Area
+import Errors
 import qualified Input
 import Intcode
-
-newtype EvalError = EvalError String deriving Show
-
-instance Exception EvalError
 
 data EnvState = EnvState
   { esInput  :: Int
@@ -118,8 +114,8 @@ fillOxygen = go . Map.map retag
   where
     retag (_, x) = (0, x)
     go m
-      | length patch == 0 = m
-      | otherwise         = go $ Map.union patch m
+      | null patch = m
+      | otherwise  = go $ Map.union patch m
       where
         patch = Map.fromList
           [ (pos, (minimum vs + 1, Oxygen))
@@ -134,6 +130,3 @@ fork ways =
   | Way is path s pos <- ways
   , d <- dirs
   ]
-
-failWith :: MonadIO m => String -> m a
-failWith = liftIO . throwIO . EvalError

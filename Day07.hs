@@ -7,17 +7,13 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE TupleSections #-}
 
-import Control.Exception
 import Control.Monad.State
 import Data.List (nub)
 import Data.Maybe (catMaybes)
 
+import Errors
 import qualified Input
 import Intcode
-
-newtype EvalError = EvalError String deriving Show
-
-instance Exception EvalError
 
 data EnvState = EnvState
   { esInput  :: [Int]
@@ -76,7 +72,6 @@ main = do
                 pure (True, x)
               _                            ->
                 failWith "Halted before any output!"
-        failWith = liftIO . throwIO . EvalError
     run1 program ps = fmap snd . run 0 $ initStates program ps
     run2 program ps = loop 0 $ initStates program ps
       where
@@ -84,7 +79,7 @@ main = do
           (xs, v)
             | and fs      -> pure v
             | not (or fs) -> loop v $ map ((,Nothing) . snd) xs
-            | otherwise   -> throwIO $ EvalError "Non-consistent amps!"
+            | otherwise   -> failWith "Non-consistent amps!"
             where
               fs = map fst xs
 
