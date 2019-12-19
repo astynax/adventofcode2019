@@ -57,7 +57,20 @@ main = do
   rm <- allWays maze $ P '@' : ks
   print =<< walk rm ks
   putStrLn "Step 2"
-  print "TODO"
+  let
+    ((cx, cy):_) = [ p | (p, Poi (P '@')) <- Map.toList maze ]
+    patch        = Map.fromList
+      [ ((cx + x, cy + y), Poi (P c))
+      | (y, row) <- zip [-1..1]
+        [ "1#2"
+        , "###"
+        , "3#4"
+        ]
+      , (x, c) <- zip [-1..1] row
+      ]
+    maze2        = Map.union patch maze
+  rm2 <- allWays maze2 $ map P "1234" ++ ks
+  print =<< walk2 rm2 ks
 
 buildMaze :: String -> MazeMap
 buildMaze = Area.build fromChar
@@ -100,6 +113,40 @@ walk rm keys = do
               | otherwise            -> pure ()
               where
                 goDeep = dfs (getPoi e : path) (n + y) (Set.insert e ks) e
+
+walk2 :: MonadIO m => RouteMap -> [Poi] -> m (Maybe (Int, String))
+walk2 rm keys = do
+  cache <- dfs [] 0 Set.empty start `execStateT` HashMap.empty
+--  mapM_ (liftIO . print) $ sortOn (length . fst) $ HashMap.toList cache
+  let
+    target = drop 4 $ cacheKey start allKeys
+    ways   = [v | (k, v) <- HashMap.toList cache, drop 4 k == target]
+  pure $ case sortOn fst ways of
+    (x:_) -> Just x
+    _     -> Nothing
+  where
+    start = [P '1', P '2', P '3', P '4']
+    allKeys = Set.fromList keys
+    cacheKey s = map getPoi . (sort s ++) . sort . Set.toList
+    dfs path n !ks starts = do
+      liftIO $ print $ length ks
+      gets (HashMap.lookup key) >>= \case
+        Just (x, _) | x <= n -> pure ()
+        _                    -> do
+          modify $ HashMap.insert key (n, reverse path)
+          forM_ starts $ \s ->
+            mapM_ (try s (filter (/= s) starts)) $
+              Set.toList $ Set.difference allKeys ks
+      where
+        key = cacheKey starts ks
+        try s ss e =
+          case HashMap.lookup (toKey (s, e)) rm of
+            Nothing                  -> error $ "Bad pair:" ++ show (s, e)
+            Just (xs, y)
+              | Set.isSubsetOf xs ks ->
+                dfs (getPoi e : path) (n + y) (Set.insert e ks) (e : ss)
+              | otherwise            ->
+                pure ()
 
 allWays
   :: MonadIO m
