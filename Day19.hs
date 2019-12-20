@@ -17,7 +17,7 @@ import qualified Input
 import Errors
 import Intcode
 
-newtype ScannerEnv a = SEnv (StateT Scanner IO a)
+newtype ScannerEnv m a = SEnv (StateT Scanner m a)
   deriving (Functor, Applicative, Monad)
 
 data Scanner = Scanner
@@ -25,7 +25,7 @@ data Scanner = Scanner
   , sOutput :: !(Maybe Int)
   }
 
-instance MonadEnv ScannerEnv where
+instance MonadIO m => MonadEnv (ScannerEnv m) where
   envInput     = SEnv $
     gets sInput >>= \case
       []     -> failWith "Input underflow!"
@@ -45,23 +45,24 @@ main = do
     Nothing -> '.'
   print $ length m
   putStrLn "Step 2"
-  print "TODO"
+  (x, y) <- searchPlace program 900
+  print $ x * 10000 + y
 
-runScannerEnv :: ScannerEnv a -> Pos -> IO (a, Maybe Int)
+runScannerEnv :: MonadIO m => ScannerEnv m a -> Pos -> m (a, Maybe Int)
 runScannerEnv (SEnv a) (x, y) =
   fmap sOutput <$> a `runStateT` Scanner
     { sInput = [x, y]
     , sOutput = Nothing
     }
 
-scanPos :: Intcode -> Pos -> IO Bool
+scanPos :: MonadIO m => Intcode -> Pos -> m Bool
 scanPos program pos =
   runScannerEnv (Intcode.runIntcode program) pos >>= \case
     ((Left err, _), _)       -> failWith $ show err
     (_,             Nothing) -> failWith $ "No output for " ++ show pos
     (_,             Just x)  -> pure $ x == 1
 
-traceBeam :: Intcode -> IO (AreaMap ())
+traceBeam :: MonadIO m => Intcode -> m (AreaMap ())
 traceBeam program = foldM step Map.empty positions
   where
     step m pos =
@@ -70,6 +71,30 @@ traceBeam program = foldM step Map.empty positions
         _    -> pure m
     positions =
       [ (x, y)
-      | y <- [0..9]
-      , x <- [0..9]
+      | y <- [0..49]
+      , x <- [0..49]
       ]
+
+searchPlace :: Intcode -> Int -> IO Pos
+searchPlace prog offset =
+  (start >> go) `runReaderT` prog `evalStateT` (0, offset)
+  where
+    start = beam R not >> step R
+    go = do
+      (x, y) <- get
+      here <- scan
+      unless here $ failWith $ show (x, y)
+      opp <- join $ asks scanPos <*> pure (x + 99, y - 99)
+      if opp
+        then pure (x, y - 99)
+        else do
+          step R >> beam D id
+          go
+    step = modify . move
+    scan = join $ asks scanPos <*> get
+    beam dir test = do
+      old <- get
+      step dir
+      test <$> scan >>= \case
+        True -> beam dir test
+        _    -> put old
