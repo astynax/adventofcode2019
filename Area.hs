@@ -8,6 +8,7 @@ module Area
   , visualize, build
   , move, turnLeft, turnRight
   , neibs
+  , bounds
   ) where
 
 import Data.Map.Strict (Map)
@@ -25,12 +26,12 @@ dirs = [U, D, L, R]
 visualize :: (Maybe v -> Char) -> AreaMap v -> IO ()
 visualize toChar m = mapM_ putStrLn rows
   where
-    (xs, ys) = unzip . map fst $ Map.toList m
+    ((nx, ny), (mx, my)) = bounds m
     rows =
       [ [ toChar $ Map.lookup (x, y) m
-        | x <- [minimum xs .. maximum xs]
+        | x <- [nx .. mx]
         ]
-      | y <- [minimum ys .. maximum ys]
+      | y <- [ny .. my]
       ]
 
 move :: Dir -> Pos -> Pos
@@ -65,3 +66,8 @@ build toCell s = Map.fromList
   | (y, row) <- zip [0..] $ lines s
   , (x, Just v) <- map (fmap toCell) $ zip [0..] row
   ]
+
+bounds :: AreaMap a -> ((Int, Int), (Int, Int))
+bounds m = ((minimum xs, minimum ys), (maximum xs, maximum ys))
+  where
+    (xs, ys) = unzip $ Map.keys m
