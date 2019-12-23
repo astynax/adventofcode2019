@@ -64,9 +64,12 @@ data Reg (m :: RunMode) (r :: RegMode) where
 deriving instance Show (Reg m r)
 
 data SpringOp (m :: RunMode) where
-  (:||) :: forall r m. Reg m r -> Reg m 'RW -> SpringOp m
-  (:&&) :: forall r m. Reg m r -> Reg m 'RW -> SpringOp m
-  (:!>) :: forall r m. Reg m r -> Reg m 'RW -> SpringOp m
+  OR  :: forall r m. Reg m r -> Reg m 'RW -> SpringOp m
+  AND :: forall r m. Reg m r -> Reg m 'RW -> SpringOp m
+  NOT :: forall r m. Reg m r -> Reg m 'RW -> SpringOp m
+
+deriving instance Show (SpringOp 'Run)
+deriving instance Show (SpringOp 'Walk)
 
 data ModeName (m :: RunMode) = MN
 
@@ -81,23 +84,23 @@ main = do
   program <- Input.ints
   putStrLn "Step 1"
   print =<< runRobot @'Walk program
-    [ C :!> J
-    , D :&& J
-    , A :!> T
-    , T :|| J
+    [ NOT C J
+    , AND D J
+    , NOT A T
+    , OR  T J
     ]
   putStrLn "Step 2"
   print =<< runRobot @'Run program
     -- @ABCDEFGHI
     -- #???!~##~#
-    [ A :|| T
-    , B :&& T
-    , C :&& T
-    , T :!> T -- !A | !B | !C
-    , E :|| J
-    , H :|| J
-    , T :&& J
-    , D :&& J -- J = (!A | !B | !C) & (E | H) & D
+    [ OR  A T
+    , AND B T
+    , AND C T
+    , NOT T T -- !A | !B | !C
+    , OR  E J
+    , OR  H J
+    , AND T J
+    , AND D J -- J = (!A | !B | !C) & (E | H) & D
     ]
 
 runRobotEnv :: MonadIO m => RobotEnv m a -> String -> m (a, RobotState)
@@ -107,7 +110,7 @@ runRobotEnv (RobotEnv a) input = a `runStateT` RobotState
   }
 
 runRobot
-  :: forall mode m. (MonadIO m, Show (ModeName mode))
+  :: forall mode m. (MonadIO m, Show (ModeName mode), Show (SpringOp mode))
   => Intcode -> SpringScript mode -> m (Maybe Int)
 runRobot prog script =
   Intcode.runIntcode prog `runRobotEnv` showSpringScript @mode script >>= \case
@@ -115,11 +118,6 @@ runRobot prog script =
     (_,             y) -> pure $ rsValue y
 
 showSpringScript
-  :: forall mode. Show (ModeName mode)
+  :: forall mode. (Show (ModeName mode), Show (SpringOp mode))
   => SpringScript mode -> String
-showSpringScript = unlines . (++ [show (MN @mode)]) . map toString
-  where
-    toString (ri :|| ro) = op "OR" ri ro
-    toString (ri :&& ro) = op "AND" ri ro
-    toString (ri :!> ro) = op "NOT" ri ro
-    op s ri ro = unwords [s, show ri, show ro]
+showSpringScript = unlines . (++ [show (MN @mode)]) . map show
